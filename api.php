@@ -12,8 +12,6 @@
 	use League\OAuth2\Client\Provider\AbstractProvider;	
 
 if (!class_exists(__NAMESPACE__ . '\API')) {
-	require_once __DIR__ . '/./vendor/autoload.php';
-
 	abstract class API {
 		//	API Authority path
 		private string $authority;
