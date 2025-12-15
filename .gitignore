@@ -36,3 +36,4 @@ includes/registration/package-lock.json
 _Archive/
 vendor
 
+composer.lock
