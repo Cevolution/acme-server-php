@@ -1,4 +1,4 @@
-<?php namespace cevolution\ciam {
+<?php namespace cevolution\acme {
     use \Lcobucci\JWT\Token;
 	use \Lcobucci\JWT\Token\Parser;
 	use \Lcobucci\JWT\Encoding\JoseEncoder;
