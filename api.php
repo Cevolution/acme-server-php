@@ -278,7 +278,7 @@ if (!class_exists(__NAMESPACE__ . '\API')) {
          * @return array|ResponseInterface
          * @throws \Exception
          */
-		protected function authorize( ServerRequestInterface $request ): ResponseInterface {
+		protected function _authorize( ServerRequestInterface $request ): ResponseInterface {
 			$parameters = $request->getQueryParams();
 
 			$scope = $parameters['scope'] ?? '';
@@ -436,7 +436,7 @@ if (!class_exists(__NAMESPACE__ . '\API')) {
 
 		/*  Endpoint for deauthorization called as an explicit HTTP DELETE.
 		*/
-		public function deauthorize( \WP_REST_Request $request ): bool | \Exception {
+		public function _deauthorize( \WP_REST_Request $request ): bool | \Exception {
 			try
 			{
 				$authorization = $request->get_headers()['authorization'] ?? [];
