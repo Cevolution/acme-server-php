@@ -1,6 +1,6 @@
 {
   "name": "cevolution/acme-server-php",
-  "version": "v1.1.1",
+  "version": "v1.3.0",
   "description": "ACME Server Library for PHP",
   "homepage": "https://cevolution.co.uk",
   "license": "MIT",
