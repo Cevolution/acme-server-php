@@ -39,7 +39,7 @@ if (!class_exists(__NAMESPACE__ . '\API')) {
 		//	Cached Decoded Bearer Token
 		protected ?Token\Plain $token = null;
 
-		//	Cached Decoded Scopes
+		//	Cached Decoded Bearer Token Scopes
 		protected array $scope = [];
 
 		protected bool $secure = true;
@@ -242,28 +242,31 @@ if (!class_exists(__NAMESPACE__ . '\API')) {
 			}
 			return($this->token);
 		}
-
+/*
 		protected function scope(array $scope): array {
 			$token = $this->token();
 
 			if ($token instanceof Token\Plain) {
 				$this->scope = preg_split('/\s+/', trim($token->claims()->get('scope', ''))) ?? [];
 
-				$difference = array_diff($scope, $this->scope);
+				return array_intersect($scope, $this->scope);
 
 				// Are all requested scopes present?
-				if (count($difference) < count($scope)) {
-					// At least some of the requested scopes are present
-					return $difference;
-				} else {
-					return [];
+				if ($intersection === []) {
+					// All requested scopes are present
+					return $scope;
 				}
+				else
+				if (count($intersection) < count($scope)) {
+					// At least some of the requested scopes are present
+					return $intersection;
+				} 
 			}
 
 			// Safest to default to empty scope
 			return [];
 		}
-
+*/
 		protected function jwt(ServerRequestInterface $request): string {
 			$authHeader = $request->getHeaderLine('Authorization');
 
@@ -418,35 +421,66 @@ if (!class_exists(__NAMESPACE__ . '\API')) {
 					}
 				}
 				else
-				if (($this->token = $this->token( $this->jwt($request) )) === null) {
-					
-				}
-				else
-				// Reaching this point means credential validation has been performed, so validate token scopes
-				if (count($this->scope = $this->scope(preg_split('/\s+/', trim($scope))) ?? [])) {
-					return new Response(
-						200,
-						['Content-Type' => 'application/json'],
-						json_encode($this->scope)
-					);
-				}
-				else
-				// Reaching this point may mean that mediation is required
-				if (in_array('endpoint:mediate', 
-						$this->scope(preg_split(
-							'/\s+/', 
-							trim($this->token->claims()->get('scope', ''))) ?? []), 
-						true)) 
-				{
-					// Advise Mediation
-					return new Response(
-						401,
-						['Content-Type' => 'application/json'],
-						json_encode([
-							'code' => 'Mediation Advised',
-							'message' => 'Access Control redirect recommended'
-						])
-					);
+				if (($this->token = $this->token( $this->jwt($request) ))) {
+
+					$this->scope = preg_split('/\s+/', trim($this->token->claims()->get('scope', ''))) ?? [];
+
+					$intersection = array_intersect(preg_split('/\s+/', trim($scope)) ?? [], $this->scope);
+
+					// Reaching this point validate token scopes
+					if (count($intersection)) {
+						return new Response(
+							200,
+							['Content-Type' => 'application/json'],
+							json_encode($intersection)
+						);
+					}
+					else
+					// Reaching this point may mean that mediation is required
+					if (in_array('endpoint:mediate', 
+							preg_split('/\s+/', 
+								trim($this->token->claims()->get('scope', ''))) ?? [], 
+							true)) 
+					{
+						// Advise Mediation
+						return new Response(
+							401,
+							['Content-Type' => 'application/json'],
+							json_encode([
+								'code' => 'Mediation Advised',
+								'message' => 'Access Control redirect recommended'
+							])
+						);
+					}
+/*
+
+
+					// Reaching this point validate token scopes
+					if (count($this->scope = $this->scope(preg_split('/\s+/', trim($scope))) ?? [])) {
+						return new Response(
+							200,
+							['Content-Type' => 'application/json'],
+							json_encode($this->scope)
+						);
+					}
+					else
+					// Reaching this point may mean that mediation is required
+					if ($this->token instanceof Token\Plain && in_array('endpoint:mediate', 
+							preg_split('/\s+/', 
+								trim($this->token->claims()->get('scope', ''))) ?? [], 
+							true)) 
+					{
+						// Advise Mediation
+						return new Response(
+							401,
+							['Content-Type' => 'application/json'],
+							json_encode([
+								'code' => 'Mediation Advised',
+								'message' => 'Access Control redirect recommended'
+							])
+						);
+					}
+*/
 				}
 			} catch (\Exception $e) {
 			}
