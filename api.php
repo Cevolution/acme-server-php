@@ -19,10 +19,10 @@
 if (!class_exists(__NAMESPACE__ . '\API')) {
 	abstract class API {
 		/** @var string Cookie name prefix for Mediated Access Tokens */
-		private const ACMEAT = 'ACMEAT';
+		private const AccessTokenPrefix = 'ACMETA';
 
 		/** @var string Cookie name prefix for Mediated Refresh Tokens */
-		private const ACMERT = 'ACMERT';
+		private const RefreshTokenPrefix = 'ACMETR';
 
 		//	Cached Bearer JWT
 		private ?string $jwt = null;
@@ -103,7 +103,7 @@ if (!class_exists(__NAMESPACE__ . '\API')) {
 						$sub = $token->claims()->get('sub');
 
 						// Does the user have a mediated Bearer Token in the Cookie?
-						$_jwt = $this->mediatedAT ?? $_COOKIE[self::ACMEAT . $sub] ?? null;
+						$_jwt = $this->mediatedAT ?? $_COOKIE[self::AccessTokenPrefix . $sub] ?? null;
 						if ($_jwt && !empty($_jwt) && $_jwt !== $jwt)
 						try {
 							// Whilst the various cookie expiry and protection mechanisms should ensure
@@ -142,7 +142,7 @@ if (!class_exists(__NAMESPACE__ . '\API')) {
 						}
 
 						// Is there a Refresh Token we can use?
-						$__jwt = $this->mediatedRT = $this->mediatedRT ?? $_COOKIE[self::ACMERT . $sub] ?? null;
+						$__jwt = $this->mediatedRT = $this->mediatedRT ?? $_COOKIE[self::RefreshTokenPrefix . $sub] ?? null;
 						if ($__jwt && !empty($__jwt) && $_jwt !== $jwt) {
 							//	Resolve immediate path to the authority as the parent, and structure so 
 							//  that cookies are resolved hierarchically.
@@ -162,7 +162,7 @@ if (!class_exists(__NAMESPACE__ . '\API')) {
 								//  verifiable uniqueness. Also prefix in a way that aligns with best practices:
 								//  https://datatracker.ietf.org/doc/html/draft-ietf-httpbis-rfc6265bis-20
 								//
-								setcookie(self::ACMEAT . $sub,
+								setcookie(self::AccessTokenPrefix . $sub,
 									$this->mediatedAT = $result?->getToken() ?? "", [
 										'expires' => $result?->getExpires() ?? time() + 3600,
 										'path' => $authority,
@@ -171,7 +171,7 @@ if (!class_exists(__NAMESPACE__ . '\API')) {
 										'httpOnly' => true,
 										'sameSite' => 'Strict'
 								]);
-								setcookie(self::ACMERT . $sub,
+								setcookie(self::RefreshTokenPrefix . $sub,
 									$this->mediatedRT = $result?->getRefreshToken() ?? $this->mediatedRT ?? "", [
 										'path' => $authority,
 										'domain' => $this->host,
@@ -187,7 +187,7 @@ if (!class_exists(__NAMESPACE__ . '\API')) {
 	//							$this->jwt = $this->__Bearer_;
 							}  catch (\Exception $exception) {
 								// Clear cookies on error
-								setcookie(self::ACMEAT . $sub, "", [
+								setcookie(self::AccessTokenPrefix . $sub, "", [
 									'expires' => time() - 3600,
 									'path' => $authority,
 									'domain' => $this->host,
@@ -196,7 +196,7 @@ if (!class_exists(__NAMESPACE__ . '\API')) {
 									'sameSite' => 'Strict'
 								]);
 
-								setcookie(self::ACMERT . $sub, "", [
+								setcookie(self::RefreshTokenPrefix . $sub, "", [
 									'expires' => time() - 3600,
 									'path' => $authority,
 									'domain' => $this->host,
@@ -343,7 +343,7 @@ if (!class_exists(__NAMESPACE__ . '\API')) {
 							//  verifiable uniqueness. Also prefix in a way that aligns with best practices:
 							//  https://datatracker.ietf.org/doc/html/draft-ietf-httpbis-rfc6265bis-20
 							//
-							setcookie(self::ACMEAT . $this->token?->claims()->get('sub'),
+							setcookie(self::AccessTokenPrefix . $this->token?->claims()->get('sub'),
 								$this->mediatedAT = $result?->getToken() ?? "", [
 									'expires' => $result?->getExpires() ?? time() + 3600,
 									'path' => $authority,
@@ -352,7 +352,7 @@ if (!class_exists(__NAMESPACE__ . '\API')) {
 									'httpOnly' => true,
 									'sameSite' => 'Strict'
 							]);
-							setcookie(self::ACMERT . $this->token?->claims()->get('sub'),
+							setcookie(self::RefreshTokenPrefix . $this->token?->claims()->get('sub'),
 								$this->mediatedRT = $result?->getRefreshToken() ?? "", [
 									'path' => $authority,
 									'domain' => $this->host,
@@ -502,7 +502,7 @@ if (!class_exists(__NAMESPACE__ . '\API')) {
 							$parent = '';
 
 							// Clear cookies
-							setcookie(self::ACMEAT . $sub, "", [
+							setcookie(self::AccessTokenPrefix . $sub, "", [
 								'expires' => time() - 3600,
 								'path' => $parent,
 								'domain' => $host,
@@ -511,7 +511,7 @@ if (!class_exists(__NAMESPACE__ . '\API')) {
 								'sameSite' => 'Strict'
 							]);
 
-							setcookie(self::ACMERT . $sub, "", [
+							setcookie(self::RefreshTokenPrefix . $sub, "", [
 								'expires' => time() - 3600,
 								'path' => $parent,
 								'domain' => $host,
