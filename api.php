@@ -36,11 +36,11 @@ if (!class_exists(__NAMESPACE__ . '\API')) {
 		//	Cached Mediated Bearer Refresh Token
 		private ?string $mediatedRT = null;
 
-		//	Cached Decoded Bearer Token Scopes
-		protected ?array $scope = null;
-
 		//	Cached Decoded Bearer Token
 		protected ?Token\Plain $token = null;
+
+		//	Cached Decoded Scopes
+		protected array $scope = [];
 
 		protected bool $secure = true;
 
@@ -93,7 +93,7 @@ if (!class_exists(__NAMESPACE__ . '\API')) {
 					));
 
 					// Update cached token information
-					$this->scope = preg_split('/\s+/', trim($token->claims()->get('scope', '')));
+					$this->scope = preg_split('/\s+/', trim($token->claims()->get('scope', ''))) ?? [];
 					$this->token = $token;
 					$this->jwt = $jwt;
 
@@ -123,7 +123,7 @@ if (!class_exists(__NAMESPACE__ . '\API')) {
 								$validator->assert($token, new Constraint\LooseValidAt(SystemClock::fromUTC()));
 
 								// Update cached token information
-								$this->scope = preg_split('/\s+/', trim($token->claims()->get('scope', '')));
+								$this->scope = preg_split('/\s+/', trim($token->claims()->get('scope', ''))) ?? [];
 								$this->token = $token;
 								$this->jwt = $_jwt;
 
@@ -221,8 +221,8 @@ if (!class_exists(__NAMESPACE__ . '\API')) {
 				\Lcobucci\JWT\Validation\RequiredConstraintsViolated |
 				\Exception $exception) {
 				// Update cached information
+				$this->scope = [];
 				$this->token = null;
-				$this->scope = null;
 				$this->jwt = null;
 
 /*
@@ -243,11 +243,11 @@ if (!class_exists(__NAMESPACE__ . '\API')) {
 			return($this->token);
 		}
 
-		protected function scope(array $scope): array | null {
+		protected function scope(array $scope): array {
 			$token = $this->token ?? $this->token();
 
 			if ($token instanceof Token\Plain) {
-				$this->scope = $this->scope ?? preg_split('/\s+/', trim($token->claims()->get('scope', '')));
+				$this->scope = $this->scope ?? preg_split('/\s+/', trim($token->claims()->get('scope', ''))) ?? [];
 
 				$difference = array_diff($scope, $this->scope);
 
@@ -256,12 +256,12 @@ if (!class_exists(__NAMESPACE__ . '\API')) {
 					// At least some of the requested scopes are present
 					return $difference;
 				} else {
-					return null;
+					return [];
 				}
 			}
 
-			// Safest to default to null
-			return null;
+			// Safest to default to empty scope
+			return [];
 		}
 
 		protected function jwt(ServerRequestInterface $request): string {
@@ -423,7 +423,7 @@ if (!class_exists(__NAMESPACE__ . '\API')) {
 				}
 				else
 				// Reaching this point means credential validation has been performed, so validate token scopes
-				if (($this->scope = $this->scope(preg_split('/\s+/', trim($scope))))) {
+				if (count($this->scope = $this->scope(preg_split('/\s+/', trim($scope))) ?? [])) {
 					return new Response(
 						200,
 						['Content-Type' => 'application/json'],
