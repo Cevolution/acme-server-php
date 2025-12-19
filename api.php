@@ -244,10 +244,10 @@ if (!class_exists(__NAMESPACE__ . '\API')) {
 		}
 
 		protected function scope(array $scope): array {
-			$token = $this->token ?? $this->token();
+			$token = $this->token();
 
 			if ($token instanceof Token\Plain) {
-				$this->scope = $this->scope ?? preg_split('/\s+/', trim($token->claims()->get('scope', ''))) ?? [];
+				$this->scope = preg_split('/\s+/', trim($token->claims()->get('scope', ''))) ?? [];
 
 				$difference = array_diff($scope, $this->scope);
 
@@ -287,8 +287,8 @@ if (!class_exists(__NAMESPACE__ . '\API')) {
 				$scope = $parameters['scope'] ?? '';
 
 				//  Are we processing authorization redirection?
-				if ($parameters['redirectUri'] ||
-					$parameters['code']) {
+				if (($parameters['redirectUri'] ?? null) ||
+					($parameters['code'] ?? null)) {
 
 					$uri = $request->getUri();		
 
@@ -317,8 +317,8 @@ if (!class_exists(__NAMESPACE__ . '\API')) {
 					]);
 
 					//
-					if ($parameters['code'] &&
-						$parameters['state']) {
+					if (($parameters['code'] ?? null) &&
+						($parameters['state'] ?? null)) {
 						// Try to get an access token (using the authorization code grant)
 						try {
 							$redirect = base64_decode( $parameters['state'] ) ?? $redirect;
@@ -432,7 +432,12 @@ if (!class_exists(__NAMESPACE__ . '\API')) {
 				}
 				else
 				// Reaching this point may mean that mediation is required
-				if (in_array('endpoint:mediate', $this->scope, true)) {
+				if (in_array('endpoint:mediate', 
+						$this->scope(preg_split(
+							'/\s+/', 
+							trim($this->token->claims()->get('scope', ''))) ?? []), 
+						true)) 
+				{
 					// Advise Mediation
 					return new Response(
 						401,
