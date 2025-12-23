@@ -14,9 +14,17 @@
 	use \Psr\Http\Message\ServerRequestInterface;
 	use \Psr\Http\Message\ResponseInterface;
 
-	use \Nyholm\Psr7\Response;
-
 if (!class_exists(__NAMESPACE__ . '\API')) {
+
+	class APIException extends \RuntimeException {
+	}
+
+	class APIRedirectException extends APIException {
+	}
+
+	class APIUnauthorizedException extends APIException {
+	}
+
 	abstract class API {
 		/** @var string Cookie name prefix for Mediated Access Tokens */
 		private const AccessTokenPrefix = 'ACMETA';
@@ -42,9 +50,11 @@ if (!class_exists(__NAMESPACE__ . '\API')) {
 		//	Cached Decoded Bearer Token Scopes
 		protected array $scope = [];
 
-		protected bool $secure = true;
-
 		protected string $host = "";
+
+		protected string $locus = "/";
+
+		protected string $scheme = "https";
 
 		//	Override to return the JWK for the supplied Key ID
 		abstract protected function jwk(string $kid): string;
@@ -54,9 +64,6 @@ if (!class_exists(__NAMESPACE__ . '\API')) {
 
 		//	Override to return the Provider instance initialized with the specified options
 		abstract protected function provider(array $options = []): AbstractProvider;
-
-		//	Override to return the Root relative path to the Authority
-		abstract protected function authority(string $root = '/'): string;
 
 		/**
          * This function will resolve the token for the supplied JWT whilst at the same time
@@ -144,10 +151,7 @@ if (!class_exists(__NAMESPACE__ . '\API')) {
 						// Is there a Refresh Token we can use?
 						$__jwt = $this->mediatedRT = $this->mediatedRT ?? $_COOKIE[self::RefreshTokenPrefix . $sub] ?? null;
 						if ($__jwt && !empty($__jwt) && $_jwt !== $jwt) {
-							//	Resolve immediate path to the authority as the parent, and structure so 
-							//  that cookies are resolved hierarchically.
-							//
-							$authority = $this->authority();
+							$secure = ($this->scheme === 'https');	
 
 							try {
 								$provider = $this->provider();
@@ -158,49 +162,48 @@ if (!class_exists(__NAMESPACE__ . '\API')) {
 								]);
 
 								//  Once the token has been obtained set the relevant cookies against the
-								//  associated path. User the 'sub' claim as part of the cookie name to ensure
-								//  verifiable uniqueness. Also prefix in a way that aligns with best practices:
+								//  associated path, resolve based on the API locus as the parent (i.e.  
+								//  structured so that cookies are resolved hierarchically). Use the 'sub' 
+								// 	claim as part of the cookie name to ensure verifiable uniqueness. 
+								// 	Also prefix in a way that aligns with best practices:
 								//  https://datatracker.ietf.org/doc/html/draft-ietf-httpbis-rfc6265bis-20
 								//
 								setcookie(self::AccessTokenPrefix . $sub,
 									$this->mediatedAT = $result?->getToken() ?? "", [
 										'expires' => $result?->getExpires() ?? time() + 3600,
-										'path' => $authority,
+										'path' => $this->locus,
 										'domain' => $this->host,
-										'secure' => $this->secure,
+										'secure' => $secure,
 										'httpOnly' => true,
 										'sameSite' => 'Strict'
 								]);
 								setcookie(self::RefreshTokenPrefix . $sub,
 									$this->mediatedRT = $result?->getRefreshToken() ?? $this->mediatedRT ?? "", [
-										'path' => $authority,
+										'path' => $this->locus,
 										'domain' => $this->host,
-										'secure' => $this->secure,
+										'secure' => $secure,
 										'httpOnly' => true,
 										'sameSite' => 'Strict'
 								]);
 
 								// Update cached token information
 								return($this->token($this->mediatedAT));
-	//							$this->token = $this->parser->parse($this->__Bearer_ ?? '');
-	//							$this->scopes = null;
-	//							$this->jwt = $this->__Bearer_;
 							}  catch (\Exception $exception) {
 								// Clear cookies on error
 								setcookie(self::AccessTokenPrefix . $sub, "", [
 									'expires' => time() - 3600,
-									'path' => $authority,
+									'path' => $this->locus,
 									'domain' => $this->host,
-									'secure' => $this->secure,
+									'secure' => $secure,
 									'httpOnly' => true,
 									'sameSite' => 'Strict'
 								]);
 
 								setcookie(self::RefreshTokenPrefix . $sub, "", [
 									'expires' => time() - 3600,
-									'path' => $authority,
+									'path' => $this->locus,
 									'domain' => $this->host,
-									'secure' => $this->secure,
+									'secure' => $secure,
 									'httpOnly' => true,
 									'sameSite' => 'Strict'
 								]);
@@ -267,10 +270,8 @@ if (!class_exists(__NAMESPACE__ . '\API')) {
 			return [];
 		}
 */
-		protected function jwt(ServerRequestInterface $request): string {
-			$authHeader = $request->getHeaderLine('Authorization');
-
-			if (preg_match('/^Bearer\s+(.+)$/i', $authHeader, $matches)) {
+		protected function jwt(string $header): string {
+			if (preg_match('/^Bearer\s+(.+)$/i', $header, $matches)) {
 				return $matches[1];
 			} else {
 				return '';
@@ -280,328 +281,261 @@ if (!class_exists(__NAMESPACE__ . '\API')) {
         /**
          * Authorization processing, typically called via an explicit HTTP request or as a result of a redirect.
          *
-         * @param ServerRequestInterface $request
-         * @return ResponseInterface
+		 * @param string $token The Bearer token (typically a JWT).
+		 * @param string $authority The Authority endpoint (URL without parameters).
+		 * @param array $parameters (URL) Parameters for authorization processing.
+		 * @return array The authorized scopes.
+		 * @throws \Exception
          */
-		protected function authorization( ServerRequestInterface $request ): ResponseInterface {
-			try {
-				$parameters = $request->getQueryParams();
+		protected function authorization( 
+			string $token,
+			string $authority,
+			array $parameters = []): array {
 
-				$scope = $parameters['scope'] ?? '';
+			$components = parse_url($authority);
 
-				//  Are we processing authorization redirection?
-				if (($parameters['redirectUri'] ?? null) ||
-					($parameters['code'] ?? null)) {
+			$host = $this->host = $components['host'];
 
-					$uri = $request->getUri();		
+			$locus = $this->locus = preg_replace('#/[^/]+$#', '', rtrim($components['path'] ?? '/', '/')) . '/';			
 
-	//				$home_url = home_url();
+			$scheme = $this->scheme = $components['scheme'];
 
-	//				$parsed_url = parse_url($home_url);
+			$redirect = $parameters['redirectUri'] ?? null;
 
-					$port = $uri->getPort();
+			$scope = $parameters['scope'] ?? '';
 
-					$route = $uri->getPath();
+			$code = $parameters['code'] ?? null;
 
-					$scheme = $uri->getScheme() ?? 'http';
+			//  Are we processing authorization redirection?
+			if ($redirect || $code) {
+				$redirect = $redirect ?? '/';
 
-					$this->secure = ($scheme === 'https');
+				$state = $parameters['state'] ?? '';
 
-					$this->host = $uri->getHost();
+				$provider = $this->provider([
+					'redirectUri' => $authority
+				]);
 
-	//				$path = $parsed_url['path'] . '/wp-json' . $route;
+				//
+				if ($code && $state) {
+					// Try to get an access token (using the authorization code grant)
+					try {
+						$secure = ($scheme === 'https');	
 
-					$redirect = $parameters['redirectUri'] ?? '/';
+						$redirect = base64_decode( $state ) ?? $redirect;
 
-					$provider = $this->provider([
-						'redirectUri' => $this->authority(($port) ?
-							$scheme . '://' . $this->host . ':' . $port . $route:
-							$scheme . '://' . $this->host . $route)
-					]);
-
-					//
-					if (($parameters['code'] ?? null) &&
-						($parameters['state'] ?? null)) {
-						// Try to get an access token (using the authorization code grant)
-						try {
-							$redirect = base64_decode( $parameters['state'] ) ?? $redirect;
-
-							$result = $provider->getAccessToken('authorization_code', [
-								'code' => $parameters['code']
-							]);
-
-							$this->jwt = $result->getToken() ?? '';
-
-							$this->parser = $this->parser ?? new Parser(new JoseEncoder());
-
-							$this->token = $this->token ?? $this->parser->parse($this->jwt);
-
-							//	Resolve immediate path to the authority as the parent, and structure so 
-							//  that cookies are resolved hierarchically.
-							//
-							$authority = $this->authority();
-
-							//  Once the token has been obtained set the relevant cookies against the
-							//  associated path. User the 'sub' claim as part of the cookie name to ensure
-							//  verifiable uniqueness. Also prefix in a way that aligns with best practices:
-							//  https://datatracker.ietf.org/doc/html/draft-ietf-httpbis-rfc6265bis-20
-							//
-							setcookie(self::AccessTokenPrefix . $this->token?->claims()->get('sub'),
-								$this->mediatedAT = $result?->getToken() ?? "", [
-									'expires' => $result?->getExpires() ?? time() + 3600,
-									'path' => $authority,
-									'domain' => $this->host,
-									'secure' => $this->secure,
-									'httpOnly' => true,
-									'sameSite' => 'Strict'
-							]);
-							setcookie(self::RefreshTokenPrefix . $this->token?->claims()->get('sub'),
-								$this->mediatedRT = $result?->getRefreshToken() ?? "", [
-									'path' => $authority,
-									'domain' => $this->host,
-									'secure' => $this->secure,
-									'httpOnly' => true,
-									'sameSite' => 'Strict'
-							]);
-						} catch (\Exception $e) {
-	/*						
-							return new Response(
-								500,
-								['Content-Type' => 'application/json'],
-								json_encode([
-									'code' => $e->getCode() || 500,
-									'message' => $e->getMessage()
-								])
-							);
-	*/						
-						}
-
-						$parsed_url = parse_url( $redirect ) ;
-
-						$scheme = $parsed_url['scheme'] ?? 'http';
-
-						$path = $parsed_url['path'] ?? '/';
-
-						// !!TODO!!: Check if the redirect URL is within the same domain
-
-						//  Redirect to the spefied URL but only within the same domain
-						return new Response(
-							302, [
-								'Location' => (isset($parsed_url['port']) ?
-									$scheme . '://' . $this->host . ':' . $parsed_url['port'] . $path:
-									$scheme . '://' . $this->host . $path)
-							]
-						);
-	/*
-						$this->redirect( (isset($parsed_url['port']) ?
-							$scheme . '://' . $host . ':' . $parsed_url['port'] . $path:
-							$scheme . '://' . $host . $path) );
-						exit;
-	*/					
-					} 
-					else
-					if (($this->token = $this->token( $this->jwt($request) )))
-					{
-						//	Calculate the authorization URL with generated state
-						$authURL = $provider->getAuthorizationUrl([
-							//  Request the scopes needed for the application; also request a refresh token
-							'scope' => 'offline_access ' . $scope,
-							//  Encode 'redirectUri' into state
-							'state' => base64_encode($redirect)
+						$result = $provider->getAccessToken('authorization_code', [
+							'code' => $parameters['code']
 						]);
 
-						//  Redirect to authorize
-						return new Response(
-							302, ['Location' => $authURL]
-						);
-	/*					
-						wp_safe_redirect( $authURL );
-						exit;
-	*/					
-					}
-				}
-				else
-				if (($this->token = $this->token( $this->jwt($request) ))) {
+						$this->jwt = $result->getToken() ?? '';
 
-					$this->scope = preg_split('/\s+/', trim($this->token->claims()->get('scope', ''))) ?? [];
+						$this->parser = $this->parser ?? new Parser(new JoseEncoder());
 
-					$intersection = array_intersect(preg_split('/\s+/', trim($scope)) ?? [], $this->scope);
+						$this->token = $this->parser->parse($this->jwt);
 
-					// Reaching this point validate token scopes
-					if (count($intersection)) {
+						//  Once the token has been obtained set the relevant cookies against the
+						//  associated path, resolve based on the API locus as the parent (i.e.  
+						//  structured so that cookies are resolved hierarchically). Use the 'sub' 
+						// 	claim as part of the cookie name to ensure verifiable uniqueness. 
+						// 	Also prefix in a way that aligns with best practices:
+						//  https://datatracker.ietf.org/doc/html/draft-ietf-httpbis-rfc6265bis-20
+						//
+						setcookie(self::AccessTokenPrefix . $this->token?->claims()->get('sub'),
+							$this->mediatedAT = $result?->getToken() ?? "", [
+								'expires' => $result?->getExpires() ?? time() + 3600,
+								'path' => $locus,
+								'domain' => $host,
+								'secure' => $secure,
+								'httpOnly' => true,
+								'sameSite' => 'Strict'
+						]);						
+						setcookie(self::RefreshTokenPrefix . $this->token?->claims()->get('sub'),
+							$this->mediatedRT = $result?->getRefreshToken() ?? "", [
+								'path' => $locus,
+								'domain' => $host,
+								'secure' => $secure,
+								'httpOnly' => true,
+								'sameSite' => 'Strict'
+						]);
+					} catch (\Exception $exception) {
+/*						
 						return new Response(
-							200,
-							['Content-Type' => 'application/json'],
-							json_encode($intersection)
-						);
-					}
-					else
-					// Reaching this point may mean that mediation is required
-					if (in_array('endpoint:mediate', 
-							preg_split('/\s+/', 
-								trim($this->token->claims()->get('scope', ''))) ?? [], 
-							true)) 
-					{
-						// Advise Mediation
-						return new Response(
-							401,
+							500,
 							['Content-Type' => 'application/json'],
 							json_encode([
-								'code' => 'Mediation Advised',
-								'message' => 'Access Control redirect recommended'
+								'code' => $e->getCode() || 500,
+								'message' => $e->getMessage()
 							])
 						);
+*/						
 					}
+/*
+					$components = parse_url( $redirect ) ;
+
+					$scheme = $components['scheme'] ?? 'http';
+
+					$path = $components['path'] ?? '/';
+
+					$port = $components['port'] ?? null;
+
+					//  Redirect to the spefied URL but only within the same domain
+					throw new APIRedirectException(
+						isset($port) ?
+							$scheme . '://' . $this->host . ':' . $port . $path:
+							$scheme . '://' . $this->host . $path,
+						302);
+*/
+					throw new APIRedirectException($redirect, 302);							
+				} else {
+					//	Calculate the authorization URL with generated state
+					$authURL = $provider->getAuthorizationUrl([
+						//  Request the scopes needed for the application; also request a refresh token
+						'scope' => 'offline_access ' . $scope,
+						//  Encode 'redirectUri' into state
+						'state' => base64_encode($redirect)
+					]);
+
+					//  Redirect to authorize
+					throw new APIRedirectException($authURL, 302);
+				}
+			}
+			else
+			if (($this->token = $this->token( $token ))) {
+
+				$this->scope = preg_split('/\s+/', trim($this->token->claims()->get('scope', ''))) ?? [];
+
+				$intersection = array_intersect(preg_split('/\s+/', trim($scope)) ?? [], $this->scope);
+
+				// Reaching this point validate token scopes
+				if (count($intersection)) {
+					return $intersection;
+				}
+				else
+				// Reaching this point may mean that mediation is required
+				if (in_array('endpoint:mediate', 
+						preg_split('/\s+/', 
+							trim($this->token->claims()->get('scope', ''))) ?? [], 
+						true)) 
+				{
+					// Advise Mediation
+					throw new APIUnauthorizedException('Mediation Advised' , 401);
+				}
 /*
 
 
-					// Reaching this point validate token scopes
-					if (count($this->scope = $this->scope(preg_split('/\s+/', trim($scope))) ?? [])) {
-						return new Response(
-							200,
-							['Content-Type' => 'application/json'],
-							json_encode($this->scope)
-						);
-					}
-					else
-					// Reaching this point may mean that mediation is required
-					if ($this->token instanceof Token\Plain && in_array('endpoint:mediate', 
-							preg_split('/\s+/', 
-								trim($this->token->claims()->get('scope', ''))) ?? [], 
-							true)) 
-					{
-						// Advise Mediation
-						return new Response(
-							401,
-							['Content-Type' => 'application/json'],
-							json_encode([
-								'code' => 'Mediation Advised',
-								'message' => 'Access Control redirect recommended'
-							])
-						);
-					}
-*/
+				// Reaching this point validate token scopes
+				if (count($this->scope = $this->scope(preg_split('/\s+/', trim($scope))) ?? [])) {
+					return new Response(
+						200,
+						['Content-Type' => 'application/json'],
+						json_encode($this->scope)
+					);
 				}
-			} catch (\Exception $e) {
+				else
+				// Reaching this point may mean that mediation is required
+				if ($this->token instanceof Token\Plain && in_array('endpoint:mediate', 
+						preg_split('/\s+/', 
+							trim($this->token->claims()->get('scope', ''))) ?? [], 
+						true)) 
+				{
+					// Advise Mediation
+					return new Response(
+						401,
+						['Content-Type' => 'application/json'],
+						json_encode([
+							'code' => 'Mediation Advised',
+							'message' => 'Access Control redirect recommended'
+						])
+					);
+				}
+*/
 			}
 
 			// Safest to default to Unauthorized
-			return new Response(
-				401,
-				['Content-Type' => 'application/json'],
-				json_encode([
-					'code' => 'Unauthorized',
-					'message' => 'You are not allowed to perform this function'
-				])
-			);
+			throw new APIUnauthorizedException('Unauthorized' , 401);
 		}
 
-		/*  Deauthorization processing, typically called via an explicit HTTP DELETE.
+		/**
+		 * Deauthorization processing, typically called via an explicit HTTP DELETE.
+		 *
+		 * @param string $token The Bearer token (typically a JWT).
+		 * @param string $authority The Authority endpoint (URL without parameters).
+		 * @return bool Result of deauthorization.
+		 * @throws \Exception
 		*/
-		public function deauthorization( \WP_REST_Request $request ): bool | \Exception {
+		public function deauthorization(
+			string $token,
+			string $authority): bool {
+			$components = parse_url($authority);
+
+			$host = $this->host = $components['host'];
+
+			$locus = $this->locus = preg_replace('#/[^/]+$#', '', rtrim($components['path'] ?? '/', '/')) . '/';
+			
+			$scheme = $this->scheme = $components['scheme'];
+
 			try
 			{
-				$authorization = $request->get_headers()['authorization'] ?? [];
+				$this->parser = $this->parser ?? new Parser(new JoseEncoder());
 
-				// Is there an Authorization Header?
-				if (count($authorization) === 1) {
-					// Trim whitespace.
-					$jwt = trim($authorization[0]);
+				$this->token = $this->parser->parse($token);
 
-					// Remove 'Bearer ' prefix, if present.
-					if (strpos( $jwt, 'Bearer ' ) === 0) {
-						$jwt = substr($jwt, 7);
-					}
+				if ($this->token instanceof Token\Plain) {
 
-					//	Check if the jwt is empty or not
-					if ($jwt === "") {
-						// Do something if JWT is empty?
-					}
-					else
-					try {
-						$this->parser = $this->parser ?? new Parser(new JoseEncoder());
+					$sub = $this->token->claims()->get('sub');
 
-						$token = $this->parser->parse($jwt);
+					$secure = ($scheme === 'https');	
 
-						if ($token instanceof Token\Plain) {
-
-							$sub = $token->claims()->get('sub');
-
-							$home_url = home_url();
-
-							$parsed_url = parse_url($home_url);
-
-							$host = $parsed_url['host'];
-
-							//	Resolve immediate path parent and structure so that cookies are resolved
-							//  hierarchically.
-							//
-//							$parent = $parsed_url['path'] . '/wp-json' . $this->authority . '/';
-
-							$parent = '';
-
-							// Clear cookies
-							setcookie(self::AccessTokenPrefix . $sub, "", [
-								'expires' => time() - 3600,
-								'path' => $parent,
-								'domain' => $host,
-								'secure' => $this->secure,
-								'httpOnly' => true,
-								'sameSite' => 'Strict'
-							]);
-
-							setcookie(self::RefreshTokenPrefix . $sub, "", [
-								'expires' => time() - 3600,
-								'path' => $parent,
-								'domain' => $host,
-								'secure' => $this->secure,
-								'httpOnly' => true,
-								'sameSite' => 'Strict'
-							]);
-
-							return(true);
-						}
-					}
-					/* `RequiredConstraintsViolated` can occur at this point if the token provided
-						(i.e. the non-mediated token) was missing required claims, had invalid values,
-						or has expired. Making a note of this here in case some specific processing is
-						required later. In a similar vein, I'm also making an additional note for the
-						`IdentityProviderException`.
-					*/
-					catch (
-						\League\OAuth2\Client\Provider\Exception\IdentityProviderException |
-						\Lcobucci\JWT\Validation\RequiredConstraintsViolated |
-						\Exception $exception) {
-
-						throw $exception; // Rethrow the exception
-					}
-				}
-			} catch (\Exception $exception) {
-/*				
-				$this->error->add(
-					$exception->getCode() || 401,
-					$exception->getMessage(), [
-						'status' => 401
+					// Clear cookies
+					setcookie(self::AccessTokenPrefix . $sub, "", [
+						'expires' => time() - 3600,
+						'path' => $locus,
+						'domain' => $host,
+						'secure' => $secure,
+						'httpOnly' => true,
+						'sameSite' => 'Strict'
 					]);
 
-				Log::Instance()->error($exception->getMessage(), [
-					'section' => __METHOD__ . ' L:' . __LINE__,
-					'error' => $this->error
-				]);
-*/
-				return($exception);
+					setcookie(self::RefreshTokenPrefix . $sub, "", [
+						'expires' => time() - 3600,
+						'path' => $locus,
+						'domain' => $host,
+						'secure' => $secure,
+						'httpOnly' => true,
+						'sameSite' => 'Strict'
+					]);
+
+					return(true);
+				}
+			}
+			/* `RequiredConstraintsViolated` can occur at this point if the token provided
+				(i.e. the non-mediated token) was missing required claims, had invalid values,
+				or has expired. Making a note of this here in case some specific processing is
+				required later. In a similar vein, I'm also making an additional note for the
+				`IdentityProviderException`.
+			*/
+			catch (
+				\League\OAuth2\Client\Provider\Exception\IdentityProviderException |
+				\Lcobucci\JWT\Validation\RequiredConstraintsViolated |
+				\Exception $exception) {
+
+				throw $exception; // Rethrow the exception
 			}
 
-			// Safest to default to Unauthorized
-			return new \Exception('Unauthorized', 401);
+			// Safest to default to false
+			return false;
 		}
 
 /*
 		abstract public static function namespace(): string;
-
-		public function __construct(string $authority) {
-			//  Structure the authority path so that it's API home relative
-			$this->authority = '/' . static::namespace() . '/' . rtrim(ltrim($authority, '/'), '/');
+*/			
+/*
+		protected function __construct(
+			string $host,
+			string $scheme = 'https') {
+			$this->secure = ($scheme === 'https');
+			$this->host = $host;
 		}
 */			
 	}
